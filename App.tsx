@@ -278,6 +278,11 @@ const App: React.FC = () => {
   const [toast, setToast] = useState('');
   const [dark, setDark] = useState(() => { try { const v = localStorage.getItem('imobiflow-theme'); return v ? v === 'dark' : true; } catch { return true; } });
   const [navHidden, setNavHidden] = useState(() => { try { return localStorage.getItem('imobiflow-nav') === 'hidden'; } catch { return false; } });
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [delOpen, setDelOpen] = useState(false);
+  const [delPwd, setDelPwd] = useState('');
+  const [delAck, setDelAck] = useState(false);
+  const [delBusy, setDelBusy] = useState(false);
   const [fImo, setFImo] = useState({ q: '', type: '', status: '', owner: '' });
   const [fInq, setFInq] = useState('');
   const [fDesp, setFDesp] = useState({ q: '', cat: '', owner: '' });
@@ -318,6 +323,25 @@ const App: React.FC = () => {
   };
   const notify = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2200); };
   const logout = async () => { await dbService.logout(); setUser(null); };
+  const closeDel = () => { if (delBusy) return; setDelOpen(false); setDelPwd(''); setDelAck(false); };
+  const confirmDelete = async () => {
+    if (!delPwd || !delAck || delBusy) return;
+    setDelBusy(true);
+    try {
+      await dbService.deleteAccount(delPwd);
+      setDelOpen(false); setAccountOpen(false); setDelPwd(''); setDelAck(false);
+      setUser(null);
+      notify('Conta excluída.');
+    } catch (err: any) {
+      const code = String(err?.code || err?.message || '');
+      let msg = 'Não foi possível excluir. Tente novamente.';
+      if (code.includes('wrong-password') || code.includes('invalid-credential')) msg = 'Senha incorreta.';
+      else if (code.includes('too-many-requests')) msg = 'Muitas tentativas. Aguarde e tente mais tarde.';
+      else if (code.includes('requires-recent-login')) msg = 'Por segurança, saia e entre de novo antes de excluir.';
+      notify(msg);
+    }
+    setDelBusy(false);
+  };
 
   const save = async () => {
     const { coll, values } = form;
@@ -677,7 +701,10 @@ const App: React.FC = () => {
             <button className="act hidesm" title={navHidden ? 'Mostrar menu' : 'Esconder menu'} onClick={() => setNavHidden(v => !v)}><i className="fas fa-bars" /></button>
             <div><h1>{titles[screen][0]}</h1><div className="subt">{titles[screen][1]}</div></div>
           </div>
-          <button className="act" title={dark ? 'Modo claro' : 'Modo escuro'} onClick={() => setDark(d => !d)} style={{ width: 38, height: 38 }}><i className={'fas ' + (dark ? 'fa-sun' : 'fa-moon')} /></button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="act" title="Minha conta" onClick={() => setAccountOpen(true)} style={{ width: 38, height: 38 }}><i className="fas fa-user" /></button>
+            <button className="act" title={dark ? 'Modo claro' : 'Modo escuro'} onClick={() => setDark(d => !d)} style={{ width: 38, height: 38 }}><i className={'fas ' + (dark ? 'fa-sun' : 'fa-moon')} /></button>
+          </div>
         </header>
         <div className="wrap">
 
@@ -1384,6 +1411,55 @@ const App: React.FC = () => {
           <div className="mf"><button className="cancel" onClick={() => setPendEdit(null)}>Cancelar</button><button className="confirm" onClick={savePendEdit}>Salvar</button></div>
         </div>
       </div>}
+      {accountOpen && <div className="ov" onClick={e => { if ((e.target as any).className === 'ov') setAccountOpen(false); }}>
+        <div className="modal" style={{ maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+          <div className="mh"><h3><i className="fas fa-user" /> Minha conta</h3></div>
+          <div className="mb">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+              <span style={{ width: 46, height: 46, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'var(--indigo-50)', color: 'var(--indigo)', fontWeight: 800, fontSize: 16, flexShrink: 0 }}>{initials(user.name)}</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink)' }}>{user.name}</div>
+                <div style={{ fontSize: 12.5, color: 'var(--gray)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.email}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '13px 0', marginTop: 12, borderTop: '1px solid var(--line2)', fontSize: 13.5 }}>
+              <span style={{ color: 'var(--gray)' }}>Plano</span>
+              <span style={{ background: 'var(--line2)', borderRadius: 20, padding: '3px 11px', fontSize: 11.5, fontWeight: 700 }}>{(!user.plan || user.plan === 'free') ? 'Gratuito' : user.plan}</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 14 }}>
+              <button style={{ padding: 12, borderRadius: 12, background: 'var(--line2)', color: 'var(--ink)', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} onClick={() => { setAccountOpen(false); logout(); }}><i className="fas fa-right-from-bracket" /> Sair da conta</button>
+              <button style={{ padding: 12, borderRadius: 12, background: 'transparent', border: '1px solid var(--red)', color: 'var(--red)', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} onClick={() => { setAccountOpen(false); setDelOpen(true); }}><i className="fas fa-trash" /> Excluir minha conta</button>
+            </div>
+          </div>
+        </div>
+      </div>}
+
+      {delOpen && <div className="ov" onClick={e => { if ((e.target as any).className === 'ov') closeDel(); }}>
+        <div className="modal" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+          <div className="mh"><h3><i className="fas fa-triangle-exclamation" style={{ color: 'var(--red)' }} /> Excluir minha conta</h3><p>Ação permanente</p></div>
+          <div className="mb">
+            <p style={{ fontSize: 13.5, color: 'var(--gray)', lineHeight: 1.55, marginBottom: 14 }}>Esta ação é <b style={{ color: 'var(--ink)' }}>permanente e não pode ser desfeita</b>. Tudo será apagado imediatamente.</p>
+            <div style={{ background: 'var(--red-50)', border: '1px solid var(--red)', borderRadius: 12, padding: '12px 14px', marginBottom: 16 }}>
+              <div style={{ fontSize: 11, color: 'var(--red)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>O que será apagado</div>
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {['Sua conta e seu acesso', 'Imóveis e proprietários', 'Inquilinos e contratos', 'Pagamentos e despesas', 'Documentos enviados'].map(t => (
+                  <li key={t} style={{ fontSize: 13, color: 'var(--ink)', paddingLeft: 16, position: 'relative' }}><span style={{ position: 'absolute', left: 0, color: 'var(--red)', fontWeight: 800 }}>×</span>{t}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="fg"><label>Digite sua senha para confirmar</label><input className="inp" type="password" value={delPwd} onChange={e => setDelPwd(e.target.value)} placeholder="••••••••" /></div>
+            <div className={'chk' + (delAck ? ' on' : '')} style={{ marginTop: 6, borderBottom: 'none' }} onClick={() => setDelAck(v => !v)}>
+              <span className="bx"><i className="fas fa-check" /></span>
+              <span style={{ fontSize: 13, color: 'var(--ink)' }}>Entendo que esta ação é permanente e apaga todos os meus dados.</span>
+            </div>
+          </div>
+          <div className="mf">
+            <button className="cancel" onClick={closeDel} disabled={delBusy}>Cancelar</button>
+            <button className="confirm" style={{ background: 'var(--red)', opacity: (!delPwd || !delAck || delBusy) ? 0.5 : 1, cursor: (!delPwd || !delAck || delBusy) ? 'not-allowed' : 'pointer' }} disabled={!delPwd || !delAck || delBusy} onClick={confirmDelete}>{delBusy ? 'Excluindo…' : 'Excluir'}</button>
+          </div>
+        </div>
+      </div>}
+
       {toast && <div className="toast"><i className="fas fa-check-circle" />{toast}</div>}
     </div>
   );

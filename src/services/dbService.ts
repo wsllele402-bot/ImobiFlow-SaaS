@@ -8,13 +8,16 @@ import {
   signOut,
   updateProfile as fbUpdateProfile,
   onAuthStateChanged,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  deleteUser,
   type User as FbUser,
 } from "firebase/auth";
 import {
   collection, doc, addDoc, setDoc, getDoc, getDocs,
   updateDoc, deleteDoc, query, where,
 } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref, uploadBytes, getDownloadURL, listAll, deleteObject } from "firebase/storage";
 import { User } from "../../types";
 
 // "payments" no app corresponde à coleção asaas_payments
@@ -37,6 +40,14 @@ const currentUserReady = (): Promise<FbUser | null> =>
       resolve(u);
     });
   });
+
+// Apaga recursivamente todos os arquivos dentro de uma "pasta" no Storage.
+const deleteStorageFolder = async (path: string): Promise<void> => {
+  const dirRef = ref(storage, path);
+  const res = await listAll(dirRef);
+  await Promise.all(res.items.map((it) => deleteObject(it)));
+  await Promise.all(res.prefixes.map((p) => deleteStorageFolder(p.fullPath)));
+};
 
 const readProfile = async (uid: string) => {
   try {
@@ -154,6 +165,43 @@ export const dbService = {
       console.error("[DB] Erro ao gerar link do documento:", err);
       return null;
     }
+  },
+
+  // Exclui a conta do próprio usuário: reautentica com a senha, apaga todos
+  // os dados dele (Firestore + arquivos) e por fim remove o login.
+  async deleteAccount(password: string) {
+    const u = auth.currentUser;
+    if (!u || !u.email) throw new Error("no-user");
+
+    // 1) Reautenticar (exigência de segurança do Firebase + confirmação forte)
+    const cred = EmailAuthProvider.credential(u.email, password);
+    await reauthenticateWithCredential(u, cred);
+    const uid = u.uid;
+
+    // 2) Apagar todos os dados do usuário em cada coleção
+    const collections = [
+      "properties", "owners", "tenants", "leases", "expenses",
+      "parkingSpots", "statusHistory", "closings", "asaas_payments",
+    ];
+    for (const c of collections) {
+      try {
+        const snap = await getDocs(query(collection(db, c), where("userId", "==", uid)));
+        await Promise.all(snap.docs.map((d) => deleteDoc(doc(db, c, d.id))));
+      } catch (e) {
+        console.warn(`[DB] Erro ao limpar ${c}:`, e);
+      }
+    }
+    // perfil do usuário
+    try { await deleteDoc(doc(db, "profiles", uid)); } catch {}
+
+    // 3) Apagar os arquivos enviados (documents/{uid}/...)
+    try { await deleteStorageFolder(`documents/${uid}`); } catch (e) {
+      console.warn("[DB] Erro ao limpar arquivos:", e);
+    }
+
+    // 4) Apagar a conta de login
+    await deleteUser(u);
+    return true;
   },
 
   async logout() {
